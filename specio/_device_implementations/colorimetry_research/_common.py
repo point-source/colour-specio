@@ -257,7 +257,7 @@ class CRDeviceBase(ABC):
 
         for p in port_list:
             try:
-                device = p.device  # type: ignore
+                device = p.device
                 sp = serial.Serial(device, **_CR_SERIAL_KWARGS)
                 sp.readall()
                 sp.write(b"RC InstrumentType\n")

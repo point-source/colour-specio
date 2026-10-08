@@ -32,6 +32,9 @@ classifiers = [
 ]
 dependencies = [
     "colour-science>=0.4.6",
+    # colour-science lists scipy as an optional extra, but its
+    # dominant-wavelength calculation imports it.
+    "scipy>=1.13.0",
     "numpy>=2.3.1",
     "pyserial>=3.5",
     "protobuf>=5.27.0",
@@ -77,6 +80,9 @@ dev = [
     "ruff>=0.12.3",
 ]
 extras = ["matplotlib>=3.7.0", "ipykernel>=6.25.0", "pandas>=2.0.0"]
+
+[tool.uv]
+required-version = ">=0.12"
 
 [tool.ruff]
 line-length = 88

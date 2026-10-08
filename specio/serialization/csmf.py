@@ -36,10 +36,10 @@ class CSMF_Metadata:
     conducted.
     """
 
-    notes: None | str = None
-    author: None | str = None
-    location: None | str = None
-    software: None | str = "colour-specio"
+    notes: str | None = None
+    author: str | None = None
+    location: str | None = None
+    software: str | None = "colour-specio"
 
 
 @dataclass(kw_only=True)
@@ -55,7 +55,9 @@ class CSMF_Data:
     test_colors: ndarray
     order: Iterable[int]
     measurements: NDArray = field(
-        default_factory=lambda: np.empty_like(prototype=SPDMeasurement)
+        # numpy's stubs reject a class as the prototype; at runtime this
+        # yields a 0-d object array.
+        default_factory=lambda: np.empty_like(prototype=SPDMeasurement)  # pyright: ignore[reportCallIssue]
     )
     metadata: CSMF_Metadata = field(default_factory=CSMF_Metadata)
 

@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
 __all__ = [
+    "FLOOR_SOURCE_NOMINAL",
     "PHOTO_RESEARCH_USB_VID",
     "MeasurementOutOfRange",
     "PRCommandError",
@@ -93,6 +94,19 @@ _NUMBER = r"[-+]?\d+(?:\.\d*)?(?:[eE][-+]?\d+)?"
 _SPECTRAL_LINE = re.compile(rf"^\s*({_NUMBER})\s*,\s*({_NUMBER})\s*$")
 _EXPOSURE = re.compile(r"(\d+(?:\.\d+)?)\s*msec", re.IGNORECASE)
 _VERSION = re.compile(r"^\d+\.\d+\w*$")
+
+# The lowest luminance each optical setup reports, in cd/m², from the
+# PR-655/670 SpectraScan User Manual, "PR-655 Sensitivity Chart",
+# Table 12. Keyed by (primary accessory, aperture) with no add-on
+# accessory fitted; only the rows that read unambiguously off the chart
+# are here. Any other setup states no floor rather than a guess.
+_NOMINAL_FLOORS: Mapping[tuple[str, str], float] = MappingProxyType(
+    {
+        ("MS-75", "1 deg"): 3.4,
+    }
+)
+
+FLOOR_SOURCE_NOMINAL = "nominal: PR-655/670 User Manual, Table 12"
 
 
 class SerialPort(Protocol):
@@ -336,6 +350,33 @@ class PRSpectrometer(SpecRadiometer):
         except DeviceError:
             return None
         return version if _VERSION.match(version) else None
+
+    @cached_property
+    def floor(self) -> float | None:
+        """The lowest luminance the current optical setup reports, cd/m².
+
+        Read from the setup the device reports (``D602``: primary
+        accessory, add-ons, aperture) and the manual's sensitivity chart.
+        None when the setup is not one the chart states unambiguously: a
+        caller then has no floor to record a too-dark refusal against.
+        The device can return readings below it; it is the manufacturer's
+        stated range, not where this unit refuses.
+        """
+        try:
+            fields = self._command("D602").fields
+        except DeviceError:
+            return None
+        if len(fields) < 5:
+            return None
+        primary, addons, aperture = fields[0], fields[1:4], fields[4]
+        if any(a != "None" for a in addons):
+            return None
+        return _NOMINAL_FLOORS.get((primary, aperture))
+
+    @property
+    def floor_source(self) -> str | None:
+        """Where `floor` comes from, or None when there is no floor."""
+        return FLOOR_SOURCE_NOMINAL if self.floor is not None else None
 
     def _raw_measure(self) -> RawSPDMeasurement:
         """

@@ -100,6 +100,9 @@ def ticking_clock(step: float = 0.1) -> Callable[[], float]:
     return clock
 
 
+# The bench PR-655's own D602 setup report: MS-75, no add-ons, 1°.
+BENCH_SETUP = b"00000,MS-75,None,None,None,1 deg,Metric,Adaptive,3 msec,Normal,1\r\n"
+
 BASE_SCRIPT: dict[str, bytes | list[bytes]] = {
     "PHOTO": b" REMOTE MODE",
     "SU1": b"00000\r\n",
@@ -109,6 +112,7 @@ BASE_SCRIPT: dict[str, bytes | list[bytes]] = {
     "D111": b"00000,PR-655\r\n",
     "D114": b"00000,2.22D\r\n",
     "D13": b"00000,Normal,1250 msec\r\n",
+    "D602": BENCH_SETUP,
     "M5": spectrum_reply(),
 }
 
@@ -296,6 +300,38 @@ class TestRecordedDevice:
         assert m.spd.shape.interval == 4
         assert list(m.XYZ) == pytest.approx(expected, rel=2e-3)
         assert m.exposure == pytest.approx(0.067)
+
+
+class TestStatedFloor:
+    def test_the_standard_lens_and_aperture_state_the_manual_s_floor(
+        self,
+    ) -> None:
+        device, _ = connect()
+
+        assert device.floor == pytest.approx(3.4)
+        assert device.floor_source is not None
+        assert "Table 12" in device.floor_source
+
+    def test_an_add_on_accessory_states_no_floor(self) -> None:
+        """An ND filter moves the floor; the chart's row no longer applies."""
+        device, _ = connect(
+            D602=b"00000,MS-75,ND-2,None,None,1 deg,Metric,Adaptive,3 msec,Normal,1\r\n"
+        )
+
+        assert device.floor is None
+        assert device.floor_source is None
+
+    def test_a_setup_the_chart_does_not_state_has_no_floor(self) -> None:
+        device, _ = connect(
+            D602=b"00000,SL-1X,None,None,None,1 deg,Metric,Adaptive,3 msec,Normal,1\r\n"
+        )
+
+        assert device.floor is None
+
+    def test_an_unreadable_setup_has_no_floor(self) -> None:
+        device, _ = connect(D602=b"-1000\r\n")
+
+        assert device.floor is None
 
 
 class TestClosing:

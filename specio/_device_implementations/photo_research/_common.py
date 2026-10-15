@@ -38,6 +38,8 @@ __email__ = "tucker@tjdcs.dev"
 __status__ = "Development"
 
 __all__ = [
+    "OUT_OF_RANGE_CODES",
+    "MeasurementOutOfRange",
     "PRCommandError",
     "PRCommandResponse",
     "PRDeviceBase",
@@ -177,6 +179,39 @@ class PRCommandError(DeviceError):
             f"data={response.raw_data!r}",
             *args,
         )
+
+
+class MeasurementOutOfRange(PRCommandError):
+    """
+    The device measured, and the light is outside what it can report.
+
+    A result rather than a failed exchange: weak light means the target is
+    below the device's floor, overload that it is above its ceiling (an
+    aperture or filter problem). Neither is a retry. Named to match the
+    Colorimetry Research driver's type of the same name, which callers
+    match on by name.
+
+    A too-dark refusal from a measurement carries the floor the device
+    states for its optical setup, and where that floor comes from, so a
+    caller can record the patch as a bound below it without knowing which
+    instrument refused. Both are None for an overload, and for a setup the
+    device states no floor for.
+    """
+
+    floor: float | None = None
+    floor_source: str | None = None
+
+    @property
+    def too_dark(self) -> bool:
+        """Whether the light was below the device's range, not above it."""
+        return self.response.code == PRResponseCode.WEAK_LIGHT
+
+
+# The measurement errors that report the light rather than the exchange
+# (PR-655/670 User Manual, Remote Control Measurement Errors).
+OUT_OF_RANGE_CODES = frozenset(
+    {PRResponseCode.WEAK_LIGHT, PRResponseCode.LIGHT_OVERLOAD}
+)
 
 
 def _names_photo_research(text: str | None) -> bool:
@@ -429,8 +464,10 @@ class PRDeviceBase(ABC):
 
         Raises
         ------
+        MeasurementOutOfRange
+            If the device measured and the light is outside its range.
         PRCommandError
-            If the device returns a non-OK response code.
+            If the device returns any other non-OK response code.
         DeviceError
             If the response is missing or has no numeric code.
         """
@@ -453,6 +490,8 @@ class PRDeviceBase(ABC):
 
         response = self._parse_response(raw_response)
 
+        if response.code in OUT_OF_RANGE_CODES:
+            raise MeasurementOutOfRange(response)
         if response.code != PRResponseCode.OK:
             raise PRCommandError(response)
 

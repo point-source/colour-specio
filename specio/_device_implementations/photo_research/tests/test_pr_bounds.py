@@ -69,7 +69,7 @@ class TestOutOfRangeIsItsOwnType:
 
 class TestARefusalCarriesItsBound:
     def test_weak_light_carries_the_stated_floor(self, open_pr: OpenPR) -> None:
-        pr, _ = open_pr({"M0": b"-0008\r\n"})
+        pr, _ = open_pr({"M5": b"-0008\r\n"})
 
         with pytest.raises(MeasurementOutOfRange) as caught:
             pr.measure()
@@ -79,7 +79,7 @@ class TestARefusalCarriesItsBound:
         assert caught.value.floor_source == FLOOR_SOURCE_NOMINAL
 
     def test_overload_carries_no_floor(self, open_pr: OpenPR) -> None:
-        pr, _ = open_pr({"M0": b"-0002\r\n"})
+        pr, _ = open_pr({"M5": b"-0002\r\n"})
 
         with pytest.raises(MeasurementOutOfRange) as caught:
             pr.measure()
@@ -88,17 +88,17 @@ class TestARefusalCarriesItsBound:
         assert caught.value.floor is None
 
     def test_a_refusal_is_not_retried(self, open_pr: OpenPR) -> None:
-        pr, port = open_pr({"M0": b"-0008\r\n"})
+        pr, port = open_pr({"M5": b"-0008\r\n"})
 
         with pytest.raises(MeasurementOutOfRange):
             pr.measure()
 
-        assert port.commands.count("M0") == 1
+        assert port.commands.count("M5") == 1
 
     def test_any_other_measurement_error_is_a_command_error(
         self, open_pr: OpenPR
     ) -> None:
-        pr, _ = open_pr({"M0": b"-0012\r\n"})
+        pr, _ = open_pr({"M5": b"-0012\r\n"})
 
         with pytest.raises(PRCommandError) as caught:
             pr.measure()
@@ -138,7 +138,7 @@ class TestRecordedDevice:
     @pytest.fixture
     def recorded(self, open_pr: OpenPR) -> PRSpectrometer:
         replies = {
-            "D5": (RECORDED / "M5.bin").read_bytes(),
+            "M5": (RECORDED / "M5.bin").read_bytes(),
             "D13": (RECORDED / "D13.bin").read_bytes(),
             "D110": (RECORDED / "D110.bin").read_bytes(),
             "D111": (RECORDED / "D111.bin").read_bytes(),

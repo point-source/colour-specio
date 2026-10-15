@@ -302,6 +302,52 @@ class TestRecordedDevice:
         assert m.exposure == pytest.approx(0.067)
 
 
+class TestARefusalCarriesItsBound:
+    """A too-dark refusal says how dark it can vouch for; overload does not."""
+
+    def test_weak_light_carries_the_stated_floor(self) -> None:
+        device, _ = connect(M5=b"-0008\r\n")
+
+        with pytest.raises(MeasurementOutOfRange) as caught:
+            device.measure()
+
+        assert caught.value.too_dark
+        assert caught.value.floor == pytest.approx(3.4)
+        assert caught.value.floor_source == device.floor_source
+
+    def test_overload_carries_no_floor(self) -> None:
+        device, _ = connect(M5=b"-0002\r\n")
+
+        with pytest.raises(MeasurementOutOfRange) as caught:
+            device.measure()
+
+        assert not caught.value.too_dark
+        assert caught.value.floor is None
+
+    def test_the_bench_sequence_sync_lost_then_weak_light(self) -> None:
+        """Black in a dark room: nothing to sync to, then too dark."""
+        device, port = connect(M5=[b"-0010\r\n", b"-0008\r\n"])
+
+        with pytest.raises(MeasurementOutOfRange) as caught:
+            device.measure()
+
+        assert caught.value.too_dark
+        assert caught.value.floor == pytest.approx(3.4)
+        assert "SS0" in port.commands
+
+    def test_weak_light_on_a_setup_with_no_stated_floor(self) -> None:
+        device, _ = connect(
+            M5=b"-0008\r\n",
+            D602=b"00000,SL-1X,None,None,None,1 deg,Metric,Adaptive,3 msec,Normal,1\r\n",
+        )
+
+        with pytest.raises(MeasurementOutOfRange) as caught:
+            device.measure()
+
+        assert caught.value.too_dark
+        assert caught.value.floor is None
+
+
 class TestStatedFloor:
     def test_the_standard_lens_and_aperture_state_the_manual_s_floor(
         self,

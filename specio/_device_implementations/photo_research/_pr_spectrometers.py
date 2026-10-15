@@ -192,7 +192,21 @@ class MeasurementOutOfRange(PRCommandError):
     a more sensitive instrument, and overload means an aperture or filter
     problem. Neither is a retry. Named to match the Colorimetry Research
     driver's type of the same name, which callers match on by name.
+
+    A refused measurement carries what a caller needs to record it as a
+    bound without knowing which instrument refused: whether the light was
+    too dark, and the floor the instrument states for its setup, with
+    where that floor comes from. `floor` is None for an overload, and for
+    a setup the instrument states no floor for.
     """
+
+    floor: float | None = None
+    floor_source: str | None = None
+
+    @property
+    def too_dark(self) -> bool:
+        """Whether the light was below the device's range, not above it."""
+        return self.code == PRStatus.WEAK_LIGHT
 
 
 @final
@@ -391,12 +405,29 @@ class PRSpectrometer(SpecRadiometer):
         Raises
         ------
         MeasurementOutOfRange
-            If the light is outside what the device can report.
+            If the light is outside what the device can report; a too-dark
+            refusal carries the floor the device states for its setup.
         PRCommandError
             For any other error status.
         """
         try:
-            reply = self._command("M5", timeout=self.measure_timeout)
+            reply = self._measure_spectrum()
+        except MeasurementOutOfRange as e:
+            if e.too_dark:
+                e.floor, e.floor_source = self.floor, self.floor_source
+            raise
+
+        return RawSPDMeasurement(
+            spd=_parse_spectrum(reply),
+            spectrometer_id=self.readable_id,
+            exposure=self._last_exposure(),
+            anc_data={"status_line": ",".join((f"{reply.code}", *reply.fields))},
+        )
+
+    def _measure_spectrum(self) -> PRReply:
+        """``M5``, falling back to unsynchronised when sync cannot lock."""
+        try:
+            return self._command("M5", timeout=self.measure_timeout)
         except PRCommandError as e:
             if e.code not in PRStatus.SYNC_FAILURES or not self.synchronised:
                 raise
@@ -407,14 +438,7 @@ class PRSpectrometer(SpecRadiometer):
                 e.code,
             )
             self._set_sync(False)
-            reply = self._command("M5", timeout=self.measure_timeout)
-
-        return RawSPDMeasurement(
-            spd=_parse_spectrum(reply),
-            spectrometer_id=self.readable_id,
-            exposure=self._last_exposure(),
-            anc_data={"status_line": ",".join((f"{reply.code}", *reply.fields))},
-        )
+            return self._command("M5", timeout=self.measure_timeout)
 
     def _last_exposure(self) -> float:
         """The last measurement's exposure in seconds, from ``D13``."""

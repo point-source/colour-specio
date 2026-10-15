@@ -25,7 +25,8 @@ if TYPE_CHECKING:
 WAVELENGTHS = range(380, 781, 4)
 
 # Replies recorded from a PR-655 (serial 65081802, software 2.51) reading
-# a ~1200 cd/m² white LED tile, 2026-10-15.
+# an LED tile showing unknown content: near-neutral, Y ≈ 1195 cd/m²,
+# xy ≈ (0.309, 0.335). 2026-10-15.
 RECORDED = Path(__file__).parent / "data"
 
 

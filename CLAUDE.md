@@ -9,8 +9,8 @@ Specio is a Python library for interacting with spectrometers and colorimeters,
 focusing on hardware instrument control for color measurement. The library is
 built around the colour-science library and provides:
 
-- Spectrometer control (currently Colorimetry Research family, tested with
-  CR300)
+- Spectrometer control (Colorimetry Research family, tested with CR300;
+  Photo Research PR-655/670, tested with PR-655)
 - Colorimeter support (Konica Minolta devices)
 - Virtual instruments for testing and development
 - Data serialization using Protocol Buffers (.csmf format)

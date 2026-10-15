@@ -59,6 +59,11 @@ _PHOTO_RESEARCH_NAMES = ("photo research", "photoresearch")
 # USB vendor IDs of other instrument makers, from the linux-usb.org usb.ids
 # list. Discovery never opens these ports.
 _OTHER_VENDOR_VIDS: Mapping[int, str] = MappingProxyType({0x132B: "Konica Minolta"})
+# Photo Research's own USB vendor ID, as a PR-655 enumerates (180B:0524).
+# On Windows' built-in USB serial driver the port's manufacturer reads
+# "Microsoft" and its description "USB Serial Device", so the VID is the
+# only thing that names the instrument.
+_PHOTO_RESEARCH_VIDS = frozenset({0x180B})
 # Device-name fragments of USB serial ports on each platform. The PR-655's
 # USB CDC interface appears as usbmodem on macOS and ttyACM on Linux; the
 # others cover USB-to-serial adapters. Windows ports are COM<n>, so there a
@@ -236,7 +241,8 @@ def _is_candidate_port(port: ListPortInfo, system: str) -> bool:
     """
     Decide from USB metadata alone whether discovery may open a port.
 
-    A port that names Photo Research is a candidate. A port whose VID
+    A port that names Photo Research, or carries its USB vendor ID, is a
+    candidate. A port whose VID
     belongs to another instrument vendor, or whose manufacturer string names
     anyone else, is not. Any other port is a candidate when its device name
     matches the platform's USB serial naming.
@@ -253,7 +259,7 @@ def _is_candidate_port(port: ListPortInfo, system: str) -> bool:
     bool
         True if discovery may open the port and send the handshake.
     """
-    if any(
+    if port.vid in _PHOTO_RESEARCH_VIDS or any(
         _names_photo_research(text)
         for text in (port.manufacturer, port.product, port.description)
     ):
@@ -364,10 +370,17 @@ class PRDeviceBase(ABC):
         Sends the five characters ``PHOTO`` one at a time with no
         terminator. The device responds with ``REMOTE MODE`` on success.
 
+        A device already in remote mode — left there by a caller that did
+        not close it — says nothing to ``PHOTO``: it takes the characters
+        as the start of a command line. On silence the line is ended with
+        a bare terminator and the device asked for its model; an answer
+        means it is already in remote mode.
+
         Raises
         ------
         DeviceError
-            If the device does not respond to the handshake.
+            If the device does not respond to the handshake, nor to the
+            model request that follows a silent one.
         """
         log = logging.getLogger("specio.PR")
         log.debug("Entering remote mode")
@@ -377,6 +390,20 @@ class PRDeviceBase(ABC):
         with self._port_timeout(_REMOTE_MODE_TIMEOUT):
             reply = self._port.read_until(_REMOTE_MODE_REPLY)
 
+        if not reply:
+            # Already in remote mode? End the partial line, discard the
+            # device's answer to it, and ask for something it can answer.
+            self._write_serial(_COMMAND_TERMINATOR)
+            self._read_response()
+            try:
+                self._write_cmd("D111")
+            except DeviceError as e:
+                raise DeviceError(
+                    f"Unexpected handshake response: {reply!r}, and no answer "
+                    "to a model request"
+                ) from e
+            log.debug("Device was already in remote mode")
+            return
         if _REMOTE_MODE_REPLY not in reply:
             raise DeviceError(f"Unexpected handshake response: {reply!r}")
 

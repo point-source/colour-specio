@@ -8,6 +8,10 @@
     "@cspell/dict-data-science/cspell-ext.json"
   ],
   "words": [
+    "msec",
+    "spectrascan",
+    "synchronised",
+    "unsynchronised",
     "specio",
     "colorimetry",
     "colorimeter",

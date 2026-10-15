@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -22,6 +23,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 WAVELENGTHS = range(380, 781, 4)
+
+# Replies recorded from a PR-655 (serial 65081802, software 2.51) reading
+# a ~1200 cd/m² white LED tile, 2026-10-15.
+RECORDED = Path(__file__).parent / "data"
 
 
 def spectrum_reply(code: str = "00000", value: float = 1.0e-3) -> bytes:
@@ -254,6 +259,42 @@ class TestMeasuring:
 
         with pytest.raises(DeviceError, match="unexpected line"):
             device.measure()
+
+
+class TestRecordedDevice:
+    """Replies captured from a real PR-655, played back."""
+
+    @staticmethod
+    def recorded() -> tuple[PRSpectrometer, FakePort]:
+        script: dict[str, bytes | list[bytes]] = {
+            cmd: (RECORDED / f"{cmd}.bin").read_bytes()
+            for cmd in ("M5", "D13", "D110", "D111", "D114")
+        }
+        port = FakePort({**BASE_SCRIPT, **script})
+        return (
+            PRSpectrometer(port, sleep=lambda _: None, clock=ticking_clock()),
+            port,
+        )
+
+    def test_identity(self) -> None:
+        device, _ = self.recorded()
+
+        assert device.readable_id == "PR655 - 65081802"
+        assert device.firmware == "2.51"
+
+    def test_the_spectrum_reproduces_the_device_s_own_tristimulus(self) -> None:
+        """XYZ integrated from M5 matches the instrument's D2 reading."""
+        device, _ = self.recorded()
+        d2 = (RECORDED / "D2.bin").read_bytes().decode().strip().split(",")
+        expected = [float(v) for v in d2[2:]]
+
+        m = device.measure()
+
+        assert m.spd.shape.start == 380
+        assert m.spd.shape.end == 780
+        assert m.spd.shape.interval == 4
+        assert list(m.XYZ) == pytest.approx(expected, rel=2e-3)
+        assert m.exposure == pytest.approx(0.067)
 
 
 class TestClosing:

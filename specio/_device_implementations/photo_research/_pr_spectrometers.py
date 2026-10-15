@@ -318,7 +318,7 @@ class PRSpectrometer(SpecRadiometer):
 
     @cached_property
     def model(self) -> str:
-        """The model reported by the device, e.g. ``PR-655``."""
+        """The model reported by the device, e.g. ``PR655`` (no hyphen)."""
         return self._command("D111").last_field
 
     @property

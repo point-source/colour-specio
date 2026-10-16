@@ -16,7 +16,7 @@ from colour import SpectralDistribution
 from specio.common import RawSPDMeasurement, SpecRadiometer
 from specio.common.exceptions import DeviceError
 
-from ._common import _COMMAND_TERMINATOR, MeasurementOutOfRange, PRDeviceBase
+from ._common import MeasurementOutOfRange, PRDeviceBase
 
 __version__ = "0.4.1.post0"
 __author__ = "Tucker Downs"
@@ -45,6 +45,8 @@ _D602_APERTURE_FIELD = 4
 _D602_EXPOSURE_MODE_FIELD = 6
 _D602_EXPOSURE_TIME_FIELD = 7
 _D602_CYCLES_FIELD = 9
+_D602_ATTEMPTS = 3
+_SPECTRUM_ATTEMPTS = 3
 
 # The lowest luminance each optical setup reports, in cd/m², from the
 # PR-655/670 User Manual's "PR-655 Sensitivity Chart" (Table 12). Keyed
@@ -295,24 +297,32 @@ class PRSpectrometer(PRDeviceBase, SpecRadiometer):
         """
         The verbose setup report (D602), read whole.
 
-        A bench PR-655 (firmware 2.51) sends the report's first 64 bytes,
-        one USB packet, and holds the rest until the host next writes, so
-        the tail would otherwise arrive inside the next command's reply. A
-        bare terminator releases it: the tail is appended here, and the
-        device's answer to the empty line that follows it is discarded.
+        A bench PR-655 (firmware 2.51) sometimes sends only the report's
+        first 64 bytes, one USB packet, and drops the rest: nothing the host
+        writes afterwards releases it, and a D602 asked straight after can
+        be cut the same way. Any other query in between clears it, so a
+        report that stops before the last field a getter reads is asked for
+        again after a model query (D111).
 
         Returns
         -------
         str
             The report's fields after the error code, comma separated.
+
+        Raises
+        ------
+        DeviceError
+            If every attempt returned a cut-short report.
         """
-        report = self._write_cmd("D602").raw_data
-        self._write_serial(_COMMAND_TERMINATOR)
-        tail = self._read_response()
-        if tail and not tail.lstrip("+-").split(",")[0].isdigit():
-            report += tail
-            self._read_response()
-        return report
+        for _ in range(_D602_ATTEMPTS):
+            report = self._write_cmd("D602").raw_data
+            if len(report.split(",")) > _D602_CYCLES_FIELD:
+                return report
+            logging.getLogger("specio.PR").debug(
+                "D602 report cut short, asking again: %r", report
+            )
+            self._write_cmd("D111")
+        raise DeviceError(f"Malformed Photo Research setup report: {report!r}")
 
     @cached_property
     def floor(self) -> float | None:
@@ -355,7 +365,8 @@ class PRSpectrometer(PRDeviceBase, SpecRadiometer):
         line, then one ``wavelength,value`` line per spectral point. M0
         followed by D5 is not used: a bench PR-655 (firmware 2.51) streams
         the whole spectrum in reply to M0 as well, and the D5 sent after it
-        collides with that stream. The spectral domain comes from those wavelengths,
+        collides with that stream. A spectrum that arrives short is read
+        again with D5. The spectral domain comes from those wavelengths,
         and D13 supplies the exposure time the measurement used.
 
         Returns
@@ -386,7 +397,18 @@ class PRSpectrometer(PRDeviceBase, SpecRadiometer):
                 e.floor, e.floor_source = self.floor, self.floor_source
             raise
 
-        wavelengths, values = self._read_spectrum(points)
+        for attempt in range(_SPECTRUM_ATTEMPTS):
+            try:
+                wavelengths, values = self._read_spectrum(points)
+                break
+            except DeviceError:
+                if attempt == _SPECTRUM_ATTEMPTS - 1:
+                    raise
+                # The reply can stop after its first 64-byte USB packet and
+                # the rest never arrive; D5 sends the stored spectrum again
+                # without measuring again.
+                log.debug("Spectrum cut short, reading it again (D5)")
+                self._write_cmd("D5")
         exposure = self._last_exposure()
 
         log.debug("Measurement complete: %d spectral points", len(values))

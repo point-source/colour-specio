@@ -95,11 +95,11 @@ class TestSpectrum:
         assert spd.shape.end == PR655_SHAPE[1]
 
     def test_short_read_raises_device_error(self, open_pr: OpenPR) -> None:
-        """Fewer lines than D120 announces is a driver error."""
+        """Fewer lines than D120 announces, every time, is a driver error."""
         received = 50
         lines = d5_reply(np.ones(PR655_POINTS)).splitlines(keepends=True)
-        header_and_received = lines[: 1 + received]
-        pr, _ = open_pr({"M5": b"".join(header_and_received)})
+        short = b"".join(lines[: 1 + received])
+        pr, _ = open_pr({"M5": short, "D5": short})
 
         with pytest.raises(DeviceError, match=f"{received} of {PR655_POINTS}"):
             pr.measure()
@@ -108,10 +108,24 @@ class TestSpectrum:
         """A data line that is not ``wl,value`` is a driver error."""
         lines = d5_reply(np.ones(PR655_POINTS)).splitlines(keepends=True)
         lines[10] = b"garbage\r\n"
-        pr, _ = open_pr({"M5": b"".join(lines)})
+        pr, _ = open_pr({"M5": b"".join(lines), "D5": b"".join(lines)})
 
         with pytest.raises(DeviceError, match="garbage"):
             pr.measure()
+
+    def test_a_spectrum_cut_at_one_packet_is_read_again(
+        self, open_pr: OpenPR
+    ) -> None:
+        """A bench PR-655 can drop all but the first 64 bytes of M5's reply."""
+        values = np.linspace(1.0, 2.0, PR655_POINTS)
+        whole = d5_reply(values)
+        pr, port = open_pr({"M5": whole[:64], "D5": whole})
+
+        spd = pr.measure().spd
+
+        np.testing.assert_allclose(spd.values, values, rtol=1e-3)
+        assert port.commands.count("M5") == 1
+        assert port.commands.count("D5") == 1
 
     def test_header_error_code_raises(self, open_pr: OpenPR) -> None:
         """The M5 header's code is an error code."""
@@ -155,7 +169,10 @@ class TestTimeouts:
         "replies",
         [
             {"M5": b"-0008\r\n"},
-            {"M5": b"00000,0,5.560e+02,1.827e-01,5.147e+01\r\n380,1.0\r\n"},
+            {
+                "M5": b"00000,0,5.560e+02,1.827e-01,5.147e+01\r\n380,1.0\r\n",
+                "D5": b"00000,0,5.560e+02,1.827e-01,5.147e+01\r\n380,1.0\r\n",
+            },
         ],
     )
     def test_restored_after_error(
@@ -238,6 +255,24 @@ class TestAverageSamples:
         pr, _ = open_pr({"D602": _d602("Adaptive", "0 msec", "3 cycles")})
 
         assert pr.average_samples == 3
+
+    def test_a_report_cut_at_one_packet_is_asked_for_again(
+        self, open_pr: OpenPR
+    ) -> None:
+        """A bench PR-655 can drop all but the first 64 bytes of D602."""
+        whole = _d602("Adaptive", "100 msec", "3 cycles")
+        pr, port = open_pr({"D602": [whole[:64], whole]})
+
+        assert pr.average_samples == 3
+        assert port.commands[-3:] == ["D602", "D111", "D602"]
+
+    def test_a_report_always_cut_short_is_an_error(self, open_pr: OpenPR) -> None:
+        """Every attempt cut short raises rather than reading a wrong field."""
+        cut = _d602("Adaptive", "100 msec", "3 cycles")[:64]
+        pr, _ = open_pr({"D602": [cut, cut, cut]})
+
+        with pytest.raises(DeviceError):
+            _ = pr.average_samples
 
     @pytest.mark.parametrize(
         ("count", "command"), [(0, "SN1"), (5, "SN5"), (150, "SN99")]
